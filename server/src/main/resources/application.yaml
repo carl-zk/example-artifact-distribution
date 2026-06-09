@@ -1,0 +1,5 @@
+spring:
+  application:
+    name: artifact-distribution
+server:
+  port: 9080
