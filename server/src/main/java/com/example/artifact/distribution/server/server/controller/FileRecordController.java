@@ -6,6 +6,7 @@ import java.nio.file.Paths;
 
 import com.example.artifact.distribution.server.server.entity.FileRecord;
 import com.example.artifact.distribution.server.server.service.FileRecordService;
+import lombok.RequiredArgsConstructor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -14,6 +15,7 @@ import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -22,18 +24,16 @@ import org.springframework.web.bind.annotation.RestController;
  * @author carl
  * @date 6/10/26 10:43 PM
  */
+@RequestMapping("/files")
 @RestController
+@RequiredArgsConstructor
 public class FileRecordController {
 	private final FileRecordService fileRecordService;
 
 	@Value("${files.uploaded.dir}")
 	private String uploadedDir;
 
-	public FileRecordController(FileRecordService fileRecordService) {
-		this.fileRecordService = fileRecordService;
-	}
-
-	@GetMapping("/files/{id}")
+	@GetMapping("/{id}")
 	public Mono getFileRecordById(@PathVariable("id") int id) {
 		return fileRecordService.findById(id)
 				.onErrorResume(Mono::error);
