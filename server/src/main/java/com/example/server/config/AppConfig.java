@@ -1,5 +1,11 @@
-package com.example.artifact.distribution.server.server.config;
+package com.example.server.config;
 
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+
+import com.example.server.service.FileTransferGrpcService;
+import io.grpc.Server;
+import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder;
 import io.r2dbc.spi.ConnectionFactory;
 
 import org.springframework.context.annotation.Bean;
@@ -24,5 +30,32 @@ public class AppConfig {
 		populator.setContinueOnError(false);
 		initializer.setDatabasePopulator(populator);
 		return initializer;
+	}
+
+	@Bean
+	public Server transferServer() {
+		Server server = NettyServerBuilder
+				.forPort(9090)
+				.maxInboundMessageSize(32 * 1024 * 1024)
+				.executor(Executors.newFixedThreadPool(32))
+				.addService(new FileTransferGrpcService())
+				.build();
+		try {
+			server.start();
+			Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+				server.shutdown();
+				try {
+					server.awaitTermination(
+							10,
+							TimeUnit.SECONDS
+					);
+				}
+				catch (InterruptedException ignored) {}
+			}));
+			return server;
+		}
+		catch (Exception e) {
+			throw new RuntimeException(e);
+		}
 	}
 }

@@ -1,4 +1,4 @@
-package com.example.artifact.distribution.server.server.support;
+package com.example.server.support;
 
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
