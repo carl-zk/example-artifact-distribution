@@ -11,6 +11,7 @@ import com.example.grpc.proto.artifact.distribution.FileRequest;
 import com.example.grpc.proto.artifact.distribution.FileTransferServiceGrpc;
 import io.grpc.stub.ClientCallStreamObserver;
 import io.grpc.stub.ClientResponseObserver;
+import jakarta.annotation.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,7 +23,7 @@ import org.slf4j.LoggerFactory;
 public class DownloadObserver implements ClientResponseObserver<FileRequest, FileChunk> {
 	public static final Logger LOGGER = LoggerFactory.getLogger(DownloadObserver.class);
 
-	final String fileId;
+	final DownloadTaskContext task;
 
 	final DownloadSession session;
 
@@ -32,17 +33,14 @@ public class DownloadObserver implements ClientResponseObserver<FileRequest, Fil
 
 	final CompletableFuture<Void> future;
 
-	final Runnable completionCallback;
+	@Nullable final Runnable completionCallback;
 
 	ClientCallStreamObserver<FileRequest> requestStream;
 
-	public DownloadObserver(String fileId,
-			DownloadSession session,
-			ResumeStore resumeStore,
-			FileTransferServiceGrpc.FileTransferServiceBlockingStub completionStub,
-			CompletableFuture<Void> future,
-			Runnable completionCallback) {
-		this.fileId = fileId;
+	public DownloadObserver(DownloadTaskContext task, DownloadSession session, ResumeStore resumeStore,
+			FileTransferServiceGrpc.FileTransferServiceBlockingStub completionStub, CompletableFuture<Void> future,
+			@Nullable Runnable completionCallback) {
+		this.task = task;
 		this.session = session;
 		this.resumeStore = resumeStore;
 		this.completionStub = completionStub;
@@ -54,12 +52,13 @@ public class DownloadObserver implements ClientResponseObserver<FileRequest, Fil
 	public void beforeStart(ClientCallStreamObserver<FileRequest> requestStream) {
 		this.requestStream = requestStream;
 		requestStream.disableAutoRequestWithInitial(1);
-		LOGGER.info("beforeStart fileId={}", fileId);
+		LOGGER.info("beforeStart taskId={}, fileId={}", task.taskId(), task.fileId());
 	}
 
 	@Override
 	public void onNext(FileChunk chunk) {
-		LOGGER.info("onNext fileId={}, chunk offset={}, size={}", fileId, chunk.getOffset(), chunk.getData().size());
+		LOGGER.info("onNext taskId={}, fileId={}, chunk offset={}, size={}", task.taskId(), task.fileId(),
+				chunk.getOffset(), chunk.getData().size());
 		try {
 			if (chunk.getLastChunk()) {
 				return;
@@ -67,12 +66,13 @@ public class DownloadObserver implements ClientResponseObserver<FileRequest, Fil
 			verifyChunk(chunk);
 			session.write(chunk);
 			long nextOffset = chunk.getOffset() + chunk.getData().size();
-			resumeStore.saveOffset(fileId, nextOffset);
+			task.transferred().set(nextOffset);
+			resumeStore.saveOffset(task.fileId(), nextOffset);
 			requestStream.request(1);
 		}
 		catch (Exception e) {
-			LOGGER.error("download failed fileId={}", fileId, e);
-			requestStream.cancel("download failed fileId=" + fileId, e);
+			LOGGER.error("download failed taskId={}, fileId={}", task.taskId(), task.fileId(), e);
+			requestStream.cancel("download failed taskId=" + task.taskId() + ", fileId=" + task.fileId(), e);
 			close();
 			future.completeExceptionally(e);
 		}
@@ -80,8 +80,8 @@ public class DownloadObserver implements ClientResponseObserver<FileRequest, Fil
 
 	private void verifyChunk(FileChunk chunk) {
 		byte[] data = chunk.getData().toByteArray();
-		String actualHash = HashUtil.sha256(data);
-		if (!actualHash.equals(chunk.getSha256())) {
+		long actualHash = HashUtil.xxh3(data);
+		if (actualHash != chunk.getHash()) {
 			throw new ChunckVerificationException(null, chunk.getOffset());
 		}
 	}
@@ -90,13 +90,17 @@ public class DownloadObserver implements ClientResponseObserver<FileRequest, Fil
 		try {
 			session.close();
 		}
-		catch (Exception ignored) {}
-		completionCallback.run();
+		catch (Exception e) {
+			LOGGER.error("close failed taskId={}, fileId={}", task.taskId(), task.fileId(), e);
+		}
+		if (completionCallback != null) {
+			completionCallback.run();
+		}
 	}
 
 	@Override
 	public void onError(Throwable t) {
-		LOGGER.error("stream error fileId={}", fileId, t);
+		LOGGER.error("stream error taskId={}, fileId={}", task.taskId(), task.fileId(), t);
 		close();
 		future.completeExceptionally(t);
 	}
@@ -105,16 +109,15 @@ public class DownloadObserver implements ClientResponseObserver<FileRequest, Fil
 	public void onCompleted() {
 		try {
 			String finalHash = session.finalHash();
-			CompletionResponse response = completionStub.reportCompletion(
-					CompletionRequest.newBuilder()
-							.setTransferId("")
-							.setFileId(fileId)
-							.setFinalHash(finalHash).build());
+			CompletionResponse response = completionStub.reportCompletion(CompletionRequest.newBuilder()
+					.setTransferId(task.transferId())
+					.setFileId(task.fileId())
+					.setFinalHash(finalHash).build());
 			if (!response.getSuccess()) {
 				throw new IOException(response.getMessage());
 			}
-			resumeStore.complete(fileId);
-			LOGGER.info("download completed fileId={}", fileId);
+			resumeStore.complete(task.fileId());
+			LOGGER.info("download completed taskId={}, fileId={}", task.taskId(), task.fileId());
 			future.complete(null);
 		}
 		catch (Exception e) {

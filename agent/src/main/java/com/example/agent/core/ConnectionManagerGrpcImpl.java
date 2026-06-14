@@ -1,6 +1,5 @@
 package com.example.agent.core;
 
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -8,12 +7,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.example.grpc.proto.artifact.distribution.AgentMessage;
 import com.example.grpc.proto.artifact.distribution.ControlPlaneGrpc;
-import com.example.grpc.proto.artifact.distribution.FileTransferServiceGrpc;
 import com.example.grpc.proto.artifact.distribution.Heartbeat;
 import com.example.grpc.proto.artifact.distribution.RegisterRequest;
 import com.example.grpc.proto.artifact.distribution.ServerMessage;
+import com.example.grpc.proto.artifact.distribution.TaskStatus;
+import com.example.grpc.proto.artifact.distribution.TransferProcess;
 import io.grpc.ManagedChannel;
-import io.grpc.ManagedChannelBuilder;
 import io.grpc.stub.StreamObserver;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -45,9 +44,7 @@ public class ConnectionManagerGrpcImpl implements ConnectionManager {
 
 	final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
-	final ExecutorService taskExecutor;
-
-	volatile ManagedChannel channel;
+	final ManagedChannel channel;
 
 	volatile StreamObserver<AgentMessage> requestStream;
 
@@ -57,27 +54,20 @@ public class ConnectionManagerGrpcImpl implements ConnectionManager {
 
 	final AtomicBoolean reconnectScheduled = new AtomicBoolean(false);
 
-	final AgentDownloader downloader;
+	final DownloadTaskRegistry registry;
 
-	final DownloadTaskDispatcher dispatcher;
+	final GrpcClient grpcClient;
 
 	@PostConstruct
 	@Override
 	public void start() {
-		this.channel = ManagedChannelBuilder
-				.forAddress("localhost", 9090)
-				.enableRetry()
-				.maxRetryAttempts(1)
-				.keepAliveTime(5, TimeUnit.MINUTES)
-				.keepAliveTimeout(20, TimeUnit.SECONDS)
-				.keepAliveWithoutCalls(false)
-				.maxInboundMessageSize(32 * 1024 * 1024)
-				.usePlaintext()
-				.build();
-		LOGGER.info("Connect to server successfully, channel={}", System.identityHashCode(channel));
 		scheduler.scheduleAtFixedRate(this::sendHeartbeat,
 				30,
 				30,
+				TimeUnit.SECONDS);
+		scheduler.scheduleAtFixedRate(this::sendProgress,
+				1,
+				1,
 				TimeUnit.SECONDS);
 		connect();
 	}
@@ -87,10 +77,9 @@ public class ConnectionManagerGrpcImpl implements ConnectionManager {
 			return;
 		}
 		try {
-			ControlPlaneGrpc.ControlPlaneStub stub = ControlPlaneGrpc.newStub(channel);
+			ControlPlaneGrpc.ControlPlaneStub stub = grpcClient.getControlPlaneStub();
 			requestStream = stub.connect(streamObserver);
 			sendRegister();
-			connected.set(true);
 		}
 		finally {
 			connecting.set(false);
@@ -102,16 +91,18 @@ public class ConnectionManagerGrpcImpl implements ConnectionManager {
 		public void onNext(ServerMessage msg) {
 			if (msg.hasAssignTask()) {
 				LOGGER.info("new task: {}", msg.getAssignTask().getSource());
-				taskExecutor.submit(() -> {
-					try {
-						LOGGER.info("start download");
-						downloader.download(msg.getAssignTask().getSource(), FileTransferServiceGrpc.newStub(channel), FileTransferServiceGrpc.newBlockingStub(channel));
-						LOGGER.info("download rpc submitted");
-					}
-					catch (Exception e) {
-						LOGGER.error("download error", e);
-					}
-				});
+				var task = msg.getAssignTask();
+				registry.enqueue(task.getTaskId(), task.getSource());
+				LOGGER.info("task enqueued taskId={}", task.getTaskId());
+			}
+			if (msg.hasRegisterAck()) {
+				if (msg.getRegisterAck().getSuccess()) {
+					connected.set(true);
+					LOGGER.info("agent register success");
+				}
+				else {
+					LOGGER.error("agent register failed");
+				}
 			}
 		}
 
@@ -181,7 +172,16 @@ public class ConnectionManagerGrpcImpl implements ConnectionManager {
 
 	@Override
 	public void sendProgress() {
-
+		for (DownloadTaskContext task : registry.all()) {
+			if (task.status().get() == TaskStatus.RUNNING) {
+				requestStream.onNext(AgentMessage.newBuilder().setProgress(
+								TransferProcess.newBuilder()
+										.setTaskId(task.taskId())
+										.setTransferred(task.transferred().get())
+										.build())
+						.build());
+			}
+		}
 	}
 
 	@Override
@@ -192,7 +192,6 @@ public class ConnectionManagerGrpcImpl implements ConnectionManager {
 	@PreDestroy
 	public void stop() {
 		scheduler.shutdownNow();
-		taskExecutor.shutdownNow();
 		if (requestStream != null) {
 			requestStream.onCompleted();
 		}

@@ -41,6 +41,11 @@
 			<artifactId>netty-pojo</artifactId>
 			<version>0.0.1-SNAPSHOT</version>
 		</dependency>
+		<dependency>
+			<groupId>com.dynatrace.hash4j</groupId>
+			<artifactId>hash4j</artifactId>
+			<version>0.30.0</version>
+		</dependency>
 	</dependencies>
 
 </project>

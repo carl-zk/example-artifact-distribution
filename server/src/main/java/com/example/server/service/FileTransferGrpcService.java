@@ -47,10 +47,15 @@ public class FileTransferGrpcService extends FileTransferServiceGrpc.FileTransfe
 					.fileId("1")
 					.path(path)
 					.build();
+			@SuppressWarnings("resource")
 			FileChannel channel = FileChannel.open(Path.of(metadata.getPath()), StandardOpenOption.READ);
 			channel.position(request.getStartOffset());
-			SendContext ctx = new SendContext(channel, new AtomicLong(request.getStartOffset()),
-					ByteBuffer.allocate(chunkSize), new AtomicBoolean(false), new AtomicBoolean(false), new AtomicBoolean(false));
+			SendContext ctx = new SendContext(channel, new AtomicLong(
+					request.getStartOffset()),
+					ByteBuffer.allocate(chunkSize),
+					new AtomicBoolean(false),
+					new AtomicBoolean(false),
+					new AtomicBoolean(false));
 			observer.setOnCancelHandler(() -> {
 				ctx.completed.set(true);
 				close(ctx);
@@ -92,7 +97,7 @@ public class FileTransferGrpcService extends FileTransferServiceGrpc.FileTransfe
 				observer.onNext(FileChunk.newBuilder()
 						.setTransferId(request.getTransferId())
 						.setFileId(request.getFileId())
-						.setSha256(HashUtil.sha256(bytes))
+						.setHash(HashUtil.xxh3(bytes))
 						.setOffset(ctx.offset.longValue())
 						.setData(UnsafeByteOperations.unsafeWrap(bytes)) // less once copy than ByteString.copyFrom(bytes)
 						.build());

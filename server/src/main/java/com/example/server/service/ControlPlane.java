@@ -6,6 +6,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import com.example.grpc.proto.artifact.distribution.AgentMessage;
 import com.example.grpc.proto.artifact.distribution.AssignTask;
 import com.example.grpc.proto.artifact.distribution.ControlPlaneGrpc;
+import com.example.grpc.proto.artifact.distribution.RegisterAck;
 import com.example.grpc.proto.artifact.distribution.ServerMessage;
 import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
@@ -32,16 +33,27 @@ public class ControlPlane extends ControlPlaneGrpc.ControlPlaneImplBase {
 				if (msg.hasRegister()) {
 					agentId = msg.getRegister().getAgentId();
 					agentChannels.put(agentId, responseObserver);
-					System.out.println("Agent " + agentId + " connected");
+					LOGGER.info("Agent {} connected", agentId);
+					responseObserver.onNext(ServerMessage.newBuilder()
+							.setRegisterAck(RegisterAck.newBuilder()
+									.setAgentId(agentId)
+									.setSuccess(true)
+									.build())
+							.build());
 					responseObserver.onNext(ServerMessage.newBuilder()
 							.setAssignTask(AssignTask.newBuilder()
+									.setTaskId("taskid1")
 									.setSource("1")
 									.build())
 							.build());
 				}
 
 				if (msg.hasHeartbeat()) {
-					System.out.println("heartbeat: " + msg.getHeartbeat());
+					LOGGER.info("Agent {} heartbeat: {}", agentId, msg.getHeartbeat());
+				}
+
+				if (msg.hasProgress()) {
+					LOGGER.info("Agent {} progress: {} ", agentId, msg.getProgress());
 				}
 			}
 

@@ -4,9 +4,8 @@ import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousFileChannel;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.security.MessageDigest;
-import java.util.HexFormat;
 
+import com.example.agent.util.HashUtil;
 import com.example.grpc.proto.artifact.distribution.FileChunk;
 
 /**
@@ -18,26 +17,24 @@ import com.example.grpc.proto.artifact.distribution.FileChunk;
 public class DownloadSession implements AutoCloseable {
 	final AsynchronousFileChannel channel;
 
-	final MessageDigest digest;
+	final Path file;
 
 	public DownloadSession(Path file) throws Exception {
+		this.file = file;
 		channel = AsynchronousFileChannel.open(file,
 				StandardOpenOption.CREATE,
 				StandardOpenOption.WRITE,
 				StandardOpenOption.READ);
-		digest = MessageDigest.getInstance("sha-256");
 	}
 
 	public void write(FileChunk chunk) throws Exception {
 		ByteBuffer buffer = chunk.getData().asReadOnlyByteBuffer();
-		ByteBuffer digestBuffer = chunk.getData().asReadOnlyByteBuffer();
 		long position = chunk.getOffset();
 		channel.write(buffer, position).get();
-		digest.update(digestBuffer);
 	}
 
 	public String finalHash() {
-		return HexFormat.of().formatHex(digest.digest());
+		return HashUtil.fileSha256(file);
 	}
 
 	@Override
