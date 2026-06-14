@@ -3,6 +3,7 @@ package com.example.server.config;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import com.example.server.service.ControlPlane;
 import com.example.server.service.FileTransferGrpcService;
 import io.grpc.Server;
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder;
@@ -36,9 +37,12 @@ public class AppConfig {
 	public Server transferServer() {
 		Server server = NettyServerBuilder
 				.forPort(9090)
+				.permitKeepAliveTime(1, TimeUnit.MINUTES)
+				.permitKeepAliveWithoutCalls(true)
 				.maxInboundMessageSize(32 * 1024 * 1024)
 				.executor(Executors.newFixedThreadPool(32))
 				.addService(new FileTransferGrpcService())
+				.addService(new ControlPlane())
 				.build();
 		try {
 			server.start();

@@ -1,10 +1,13 @@
 package com.example.agent.core;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
+import java.nio.channels.AsynchronousFileChannel;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
+import java.util.HexFormat;
+
+import com.example.grpc.proto.artifact.distribution.FileChunk;
 
 /**
  * represents one active downlaod
@@ -13,19 +16,32 @@ import java.nio.file.StandardOpenOption;
  * @date 6/12/26 7:06 AM
  */
 public class DownloadSession implements AutoCloseable {
-	final FileChannel channel;
+	final AsynchronousFileChannel channel;
 
-	public DownloadSession(Path file) throws IOException {
-		this.channel = FileChannel.open(file, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+	final MessageDigest digest;
+
+	public DownloadSession(Path file) throws Exception {
+		channel = AsynchronousFileChannel.open(file,
+				StandardOpenOption.CREATE,
+				StandardOpenOption.WRITE,
+				StandardOpenOption.READ);
+		digest = MessageDigest.getInstance("sha-256");
 	}
 
-	public synchronized void write(long offset, byte[] bytes) throws IOException {
-		channel.write(ByteBuffer.wrap(bytes), offset);
+	public void write(FileChunk chunk) throws Exception {
+		ByteBuffer buffer = chunk.getData().asReadOnlyByteBuffer();
+		ByteBuffer digestBuffer = chunk.getData().asReadOnlyByteBuffer();
+		long position = chunk.getOffset();
+		channel.write(buffer, position).get();
+		digest.update(digestBuffer);
+	}
+
+	public String finalHash() {
+		return HexFormat.of().formatHex(digest.digest());
 	}
 
 	@Override
 	public void close() throws Exception {
-		channel.force(true);
 		channel.close();
 	}
 }

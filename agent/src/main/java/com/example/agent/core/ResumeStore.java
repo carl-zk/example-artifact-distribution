@@ -4,16 +4,24 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import org.springframework.stereotype.Component;
+
 /**
  *
  * @author carl
  * @date 6/12/26 7:13 AM
  */
+@Component
 public class ResumeStore {
 	final Path resumeDir = Path.of("./resume");
 
-	public ResumeStore() throws IOException {
-		Files.createDirectories(resumeDir);
+	public ResumeStore() {
+		try {
+			Files.createDirectories(resumeDir);
+		}
+		catch (IOException e) {
+			throw new RuntimeException(e);
+		}
 	}
 
 	public long loadOffset(String fileId) throws IOException {

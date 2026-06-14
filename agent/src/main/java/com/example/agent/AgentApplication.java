@@ -1,7 +1,5 @@
 package com.example.agent;
 
-import com.example.agent.core.AgentDownloader;
-
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -19,7 +17,6 @@ public class AgentApplication implements CommandLineRunner {
 
 	@Override
 	public void run(String... args) throws Exception {
-		AgentDownloader downloader = new AgentDownloader("localhost", 9090);
-		downloader.download("1");
+		//	downloader.download("1");
 	}
 }
