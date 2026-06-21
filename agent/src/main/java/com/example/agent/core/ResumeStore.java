@@ -24,7 +24,7 @@ public class ResumeStore {
 		}
 	}
 
-	public long loadOffset(String fileId) throws IOException {
+	public long loadOffset(Integer fileId) throws IOException {
 		Path file = resumeDir.resolve(fileId + ".offset");
 		if (!Files.exists(file)) {
 			return 0;
@@ -32,12 +32,12 @@ public class ResumeStore {
 		return Long.parseLong(Files.readString(file));
 	}
 
-	public void saveOffset(String fileId, long offset) throws IOException {
+	public void saveOffset(Integer fileId, long offset) throws IOException {
 		Path file = resumeDir.resolve(fileId + ".offset");
 		Files.writeString(file, String.valueOf(offset));
 	}
 
-	public void complete(String fileId) throws IOException {
+	public void complete(Integer fileId) throws IOException {
 		Files.deleteIfExists(resumeDir.resolve(fileId + ".offset"));
 	}
 }

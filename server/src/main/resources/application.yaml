@@ -3,11 +3,17 @@ spring:
     name: artifact-distribution
   r2dbc:
     url: r2dbc:h2:file:///./data/testdb;DATABASE_TO_UPPER=false;CASE_INSENSITIVE_IDENTIFIERS=true
+  #  url: r2dbc:h2:mem:///testdb;DATABASE_TO_UPPER=false;CASE_INSENSITIVE_IDENTIFIERS=true
+  h2:
+    console:
+      enabled: true
+  sql:
+    init:
+      mode: always
 server:
   port: 9080
 logging:
   level:
     org.springframework.r2dbc: DEBUG
-files:
-  uploaded:
-    dir: /tmp/data
+configs:
+  storage-dir: /tmp/data/server

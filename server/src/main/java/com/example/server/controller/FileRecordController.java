@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
  * @author carl
  * @date 6/10/26 10:43 PM
  */
-@RequestMapping("/files")
+@RequestMapping("/api/files")
 @RestController
 @RequiredArgsConstructor
 public class FileRecordController {
@@ -33,7 +33,12 @@ public class FileRecordController {
 	}
 
 	@PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-	public Mono<FileRecord> uploadFile(@RequestPart("files") Flux<FilePart> files) {
+	public Flux<FileRecord> uploadFile(@RequestPart("files") Flux<FilePart> files) {
 		return fileRecordService.saveToDisk(files);
+	}
+
+	@GetMapping
+	public Flux<FileRecord> getFileRecords() {
+		return fileRecordService.findAll();
 	}
 }

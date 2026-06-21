@@ -10,7 +10,7 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
 /**
@@ -26,17 +26,17 @@ public class AgentDownloader {
 
 	final ResumeStore resumeStore;
 
-	final Path rootPath;
-
 	final DownloadTaskRegistry registry;
 
 	final GrpcClient grpcClient;
 
-	public AgentDownloader(ResumeStore resumeStore, @Value("${downloader.root-dir}") String rootPath, DownloadTaskRegistry registry, GrpcClient grpcClient) {
+	final ApplicationEventPublisher publisher;
+
+	public AgentDownloader(ResumeStore resumeStore, DownloadTaskRegistry registry, GrpcClient grpcClient, ApplicationEventPublisher publisher) {
 		this.resumeStore = resumeStore;
-		this.rootPath = Path.of(rootPath);
 		this.registry = registry;
 		this.grpcClient = grpcClient;
+		this.publisher = publisher;
 	}
 
 	@PostConstruct
@@ -47,18 +47,29 @@ public class AgentDownloader {
 	private void dispatchLoop() {
 		while (!Thread.currentThread().isInterrupted()) {
 			try {
-				DownloadTaskContext task = registry.take();
+				DownloadTaskContext taskContext = registry.take();
 				permits.acquire();
-				LOGGER.info("dispatch a new task {}", task.taskId());
-				CompletableFuture<Void> future = download(task);
-				future.whenComplete((taskContext, throwable) -> {
+				LOGGER.info("dispatch a new task {}", taskContext.assignTask().getTaskId());
+				CompletableFuture<Void> future = download(taskContext);
+				future.whenComplete((_, throwable) -> {
+					permits.release();
 					if (throwable == null) {
-						task.status().set(TaskStatus.SUCCESS);
-						registry.markDone(task.taskId());
+						taskContext.status().set(TaskStatus.SUCCESS);
+					}
+					else if (throwable instanceof ChunckVerificationException e) {
+						taskContext.status().set(TaskStatus.PENDING);
+						if (registry.enqueue(taskContext.assignTask())) {
+							LOGGER.info("retry task {}", taskContext.assignTask().getTaskId());
+						}
+						else {
+							taskContext.status().set(TaskStatus.CANCELLED);
+							taskContext.message().set("canceled by chunck verification");
+							LOGGER.info("retry failed, task {} already exists", taskContext.assignTask().getTaskId());
+						}
 					}
 					else {
-						task.status().set(TaskStatus.FAILED);
-						task.message().set(throwable.getMessage());
+						taskContext.status().set(TaskStatus.FAILED);
+						taskContext.message().set(throwable.getMessage());
 					}
 				});
 			}
@@ -69,31 +80,32 @@ public class AgentDownloader {
 		}
 	}
 
-	private CompletableFuture<Void> download(DownloadTaskContext task) {
-		task.status().set(TaskStatus.RUNNING);
+	private CompletableFuture<Void> download(DownloadTaskContext taskContext) {
+		taskContext.status().set(TaskStatus.RUNNING);
 		CompletableFuture<Void> future = new CompletableFuture<>();
 		try {
-			long offset = resumeStore.loadOffset(task.fileId());
-			Path target = Path.of(rootPath.toString(), task.fileId());
+			long offset = resumeStore.loadOffset(taskContext.assignTask().getFileId());
 			@SuppressWarnings("resource")
-			DownloadSession session = new DownloadSession(target);
+			DownloadSession session = new DownloadSession(Path.of(taskContext.assignTask().getTargetDir(), taskContext.assignTask().getFileName()));
 			DownloadObserver observer = new DownloadObserver(
-					task,
+					taskContext,
 					session,
 					resumeStore,
 					grpcClient.getFileTransferServiceBlockingStub(),
+					publisher,
 					future,
-					permits::release);
+					null);
 			FileRequest request = FileRequest.newBuilder()
-					.setTransferId(task.transferId())
-					.setFileId(task.fileId())
+					.setTransferId(taskContext.transferId())
+					.setTaskId(taskContext.assignTask().getTaskId())
+					.setFileId(taskContext.assignTask().getFileId())
 					.setStartOffset(offset).build();
-			LOGGER.info("invode asyncStub.downloadFile, transferId={}, taskId={}", request.getTransferId(), task.taskId());
+			LOGGER.info("invode asyncStub.downloadFile, transferId={}, taskId={}", request.getTransferId(), taskContext.assignTask().getTaskId());
 			grpcClient.getFileTransferServiceStub().downloadFile(request, observer);
-			LOGGER.info("invode asyncStub.downloadFile done, transferId={}, taskId={}", request.getTransferId(), task.taskId());
+			LOGGER.info("invode asyncStub.downloadFile done, transferId={}, taskId={}", request.getTransferId(), taskContext.assignTask().getTaskId());
 		}
 		catch (Exception e) {
-			LOGGER.error("invode asyncStub.downloadFile error", e);
+			LOGGER.error("download file error", e);
 			future.completeExceptionally(e);
 		}
 		return future;

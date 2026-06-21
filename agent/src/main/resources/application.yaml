@@ -1,6 +1,10 @@
-remote:
-  server:
-    host: localhost
-    port: 9090
-downloader:
-  root-dir: /tmp/data
+spring:
+  main:
+    keep-alive: true
+configs:
+  remote-server-host: localhost
+  remote-server-port: 9090
+  max-inbound-message-size: 10MB
+  env: local-dev
+  namespace: cluster-001
+  agent-id: agent-001

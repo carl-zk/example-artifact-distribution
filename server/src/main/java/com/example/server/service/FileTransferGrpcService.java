@@ -2,7 +2,6 @@ package com.example.server.service;
 
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.concurrent.ExecutorService;
@@ -15,26 +14,41 @@ import com.example.grpc.proto.artifact.distribution.CompletionResponse;
 import com.example.grpc.proto.artifact.distribution.FileChunk;
 import com.example.grpc.proto.artifact.distribution.FileRequest;
 import com.example.grpc.proto.artifact.distribution.FileTransferServiceGrpc;
-import com.example.server.entity.FileMetadata;
+import com.example.grpc.proto.artifact.distribution.TaskStatus;
+import com.example.server.entity.FileRecord;
+import com.example.server.entity.TaskProgressEvent;
+import com.example.server.repository.FileRecordRepository;
+import com.example.server.repository.TaskRepository;
 import com.example.server.util.HashUtil;
 import com.google.protobuf.UnsafeByteOperations;
 import io.grpc.Status;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
+import lombok.AllArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import org.springframework.stereotype.Component;
 
 /**
  *
  * @author carl
  * @date 6/11/26 10:13 PM
  */
+@AllArgsConstructor
+@Component
 public class FileTransferGrpcService extends FileTransferServiceGrpc.FileTransferServiceImplBase {
 	public static final Logger LOGGER = LoggerFactory.getLogger(FileTransferGrpcService.class);
 
 	public static final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
-	int chunkSize = 4 * 1024 * 1024; // 4M
+	public static final int CHUNK_SIZE = 4 * 1024 * 1024; // 4M
+
+	final FileRecordRepository fileRecordRepository;
+
+	private final TaskRepository taskRepository;
+
+	private final ProgressEventBus eventBus;
 
 	@Override
 	public void downloadFile(FileRequest request, StreamObserver<FileChunk> responseObserver) {
@@ -42,17 +56,15 @@ public class FileTransferGrpcService extends FileTransferServiceGrpc.FileTransfe
 
 		ServerCallStreamObserver<FileChunk> observer = (ServerCallStreamObserver<FileChunk>) responseObserver;
 		try {
-			String path = "/run/media/carl/E/backUP/哇咔咔/720P_4000K_398011191.mp4";
-			FileMetadata metadata = FileMetadata.builder()
-					.fileId("1")
-					.path(path)
-					.build();
+			FileRecord fileRecord = fileRecordRepository.findById(request.getFileId())
+					.blockOptional()
+					.orElseThrow(() -> new RuntimeException("fileRecord not  found with id=" + request.getFileId()));
 			@SuppressWarnings("resource")
-			FileChannel channel = FileChannel.open(Path.of(metadata.getPath()), StandardOpenOption.READ);
+			FileChannel channel = FileChannel.open(Path.of(fileRecord.getFilePath()), StandardOpenOption.READ);
 			channel.position(request.getStartOffset());
-			SendContext ctx = new SendContext(channel, new AtomicLong(
+			SendContext ctx = new SendContext(request, channel, new AtomicLong(
 					request.getStartOffset()),
-					ByteBuffer.allocate(chunkSize),
+					ByteBuffer.allocate(CHUNK_SIZE),
 					new AtomicBoolean(false),
 					new AtomicBoolean(false),
 					new AtomicBoolean(false));
@@ -64,13 +76,17 @@ public class FileTransferGrpcService extends FileTransferServiceGrpc.FileTransfe
 				LOGGER.info("onReady");
 				send(request, observer, ctx);
 			}));
-			if (observer.isReady()) {
-				executor.submit(() -> send(request, observer, ctx));
-			}
+			taskRepository.findById(request.getTaskId())
+					.flatMap(task -> {
+						task.setStatus(TaskStatus.RUNNING);
+						return taskRepository.save(task);
+					})
+					.doOnError(e -> LOGGER.error("error while saving task", e))
+					.subscribe();
 		}
 		catch (Exception e) {
 			LOGGER.error("request {}", request, e);
-			responseObserver.onError(e);
+			observer.onError(Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException());
 		}
 	}
 
@@ -133,20 +149,27 @@ public class FileTransferGrpcService extends FileTransferServiceGrpc.FileTransfe
 
 	@Override
 	public void reportCompletion(CompletionRequest request, StreamObserver<CompletionResponse> responseObserver) {
-		String path = "/run/media/carl/E/backUP/哇咔咔/720P_4000K_398011191.mp4";
 		try {
-			FileMetadata metadata = FileMetadata.builder()
-					.fileId(request.getFileId())
-					.path(path)
-					.size(Files.size(Path.of(path)))
-					.sha256(HashUtil.fileSha256(Path.of(path)))
-					.build();
-			boolean success = metadata.getSha256().equals(request.getFinalHash());
+			LOGGER.info("reportCompletion request {}", request);
+			FileRecord fileRecord = fileRecordRepository.findById(request.getFileId()).block();
+			assert fileRecord != null;
+			boolean success = fileRecord.getSha256().equals(request.getFinalHash());
 
 			responseObserver.onNext(CompletionResponse.newBuilder()
 					.setSuccess(success)
-					.setMessage(success ? "verified" : "hash mismatch: fileId=%s, agent hash=%s, server hash=%s".formatted(request.getFileId(), request.getFinalHash(), metadata.getSha256())).build());
+					.setMessage(success ? "verified" : "hash mismatch: fileId=%s, agent hash=%s, server hash=%s".formatted(fileRecord.getId(), request.getFinalHash(), fileRecord.getSha256())).build());
 			responseObserver.onCompleted();
+			if (success) {
+				eventBus.publish(new TaskProgressEvent(request.getTaskId(), 0L, TaskStatus.SUCCESS));
+				LOGGER.info("eventBus published taskId={} success", request.getTaskId());
+				taskRepository.findById(request.getTaskId())
+						.flatMap(task -> {
+							task.setStatus(TaskStatus.SUCCESS);
+							return taskRepository.save(task);
+						})
+						.doOnError(e -> LOGGER.error("error while saving task", e))
+						.subscribe();
+			}
 		}
 		catch (Exception e) {
 			LOGGER.error("request {}", request, e);
@@ -155,7 +178,7 @@ public class FileTransferGrpcService extends FileTransferServiceGrpc.FileTransfe
 
 	}
 
-	record SendContext(FileChannel channel, AtomicLong offset, ByteBuffer buffer,
+	record SendContext(FileRequest fileRequest, FileChannel channel, AtomicLong offset, ByteBuffer buffer,
 	                   AtomicBoolean sending,
 	                   AtomicBoolean closed,
 	                   AtomicBoolean completed) {

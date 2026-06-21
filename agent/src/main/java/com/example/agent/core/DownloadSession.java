@@ -2,6 +2,7 @@ package com.example.agent.core;
 
 import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousFileChannel;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 
@@ -20,6 +21,10 @@ public class DownloadSession implements AutoCloseable {
 	final Path file;
 
 	public DownloadSession(Path file) throws Exception {
+		Path parentDir = file.getParent();
+		if (Files.notExists(parentDir)) {
+			Files.createDirectories(parentDir);
+		}
 		this.file = file;
 		channel = AsynchronousFileChannel.open(file,
 				StandardOpenOption.CREATE,

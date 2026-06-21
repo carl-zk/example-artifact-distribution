@@ -1,6 +1,6 @@
 package com.example.server.entity;
 
-import java.util.List;
+import java.time.LocalDateTime;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -31,5 +31,5 @@ public class FileRecord {
 
 	private String sha256;
 
-	private List<String> fileNames;
+	private LocalDateTime uploadTime;
 }

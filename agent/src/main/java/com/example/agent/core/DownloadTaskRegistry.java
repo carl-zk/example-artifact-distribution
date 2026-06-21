@@ -6,6 +6,11 @@ import java.util.concurrent.BlockingDeque;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingDeque;
 
+import com.example.grpc.proto.artifact.distribution.AssignTask;
+import com.google.common.collect.ImmutableList;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.springframework.stereotype.Component;
 
 /**
@@ -15,33 +20,29 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class DownloadTaskRegistry {
-	final Map<String, DownloadTaskContext> tasks = new ConcurrentHashMap<>();
+	static final Logger LOGGER = LoggerFactory.getLogger(DownloadTaskRegistry.class);
+
+	final Map<Integer, DownloadTaskContext> tasks = new ConcurrentHashMap<>();
 
 	final BlockingDeque<DownloadTaskContext> queue = new LinkedBlockingDeque<>();
 
-	public boolean enqueue(String taskId, String fileId) {
-		DownloadTaskContext ctx = new DownloadTaskContext(taskId, fileId);
-		DownloadTaskContext existing = tasks.putIfAbsent(taskId, ctx);
-		if (existing != null) {
+	public boolean enqueue(AssignTask assignTask) {
+		DownloadTaskContext taskContext = new DownloadTaskContext(assignTask);
+		DownloadTaskContext existed = tasks.putIfAbsent(taskContext.assignTask().getTaskId(), taskContext);
+		if (existed != null) {
+			LOGGER.warn("taskContext already exists, taskId={}, fileName={}", taskContext.assignTask().getTaskId(), taskContext.assignTask().getFileName());
 			return false;
 		}
-		queue.offer(ctx);
-		return true;
+		return queue.offer(taskContext);
 	}
 
 	public DownloadTaskContext take() throws InterruptedException {
-		return queue.take();
-	}
-
-	public DownloadTaskContext get(String taskId) {
-		return tasks.get(taskId);
+		var c = queue.take();
+		tasks.remove(c.assignTask().getTaskId());
+		return c;
 	}
 
 	public Collection<DownloadTaskContext> all() {
-		return tasks.values();
-	}
-
-	public void markDone(String taskId) {
-		tasks.remove(taskId);
+		return ImmutableList.copyOf(tasks.values());
 	}
 }

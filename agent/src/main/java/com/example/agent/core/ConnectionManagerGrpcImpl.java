@@ -1,16 +1,18 @@
 package com.example.agent.core;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import com.example.agent.config.ConfigProps;
 import com.example.grpc.proto.artifact.distribution.AgentMessage;
 import com.example.grpc.proto.artifact.distribution.ControlPlaneGrpc;
 import com.example.grpc.proto.artifact.distribution.Heartbeat;
 import com.example.grpc.proto.artifact.distribution.RegisterRequest;
 import com.example.grpc.proto.artifact.distribution.ServerMessage;
-import com.example.grpc.proto.artifact.distribution.TaskStatus;
 import com.example.grpc.proto.artifact.distribution.TransferProcess;
 import io.grpc.ManagedChannel;
 import io.grpc.stub.StreamObserver;
@@ -22,7 +24,10 @@ import org.slf4j.LoggerFactory;
 import oshi.SystemInfo;
 import oshi.hardware.CentralProcessor;
 import oshi.hardware.GlobalMemory;
+import oshi.software.os.OperatingSystem;
 
+import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
@@ -40,9 +45,11 @@ import org.springframework.stereotype.Component;
 public class ConnectionManagerGrpcImpl implements ConnectionManager {
 	public static final Logger LOGGER = LoggerFactory.getLogger(ConnectionManagerGrpcImpl.class);
 
-	public final String agentId = "abc";
+	final ConfigProps configProps;
 
-	final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+	final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(
+			Thread.ofPlatform().name("scheduler-", 0).factory()
+	);
 
 	final ManagedChannel channel;
 
@@ -61,14 +68,6 @@ public class ConnectionManagerGrpcImpl implements ConnectionManager {
 	@PostConstruct
 	@Override
 	public void start() {
-		scheduler.scheduleAtFixedRate(this::sendHeartbeat,
-				30,
-				30,
-				TimeUnit.SECONDS);
-		scheduler.scheduleAtFixedRate(this::sendProgress,
-				1,
-				1,
-				TimeUnit.SECONDS);
 		connect();
 	}
 
@@ -90,10 +89,10 @@ public class ConnectionManagerGrpcImpl implements ConnectionManager {
 		@Override
 		public void onNext(ServerMessage msg) {
 			if (msg.hasAssignTask()) {
-				LOGGER.info("new task: {}", msg.getAssignTask().getSource());
+				LOGGER.info("new task: {}", msg.getAssignTask().getTaskId());
 				var task = msg.getAssignTask();
-				registry.enqueue(task.getTaskId(), task.getSource());
-				LOGGER.info("task enqueued taskId={}", task.getTaskId());
+				registry.enqueue(task);
+				LOGGER.info("task enqueued taskId={}, fileName={}", task.getTaskId(), task.getFileName());
 			}
 			if (msg.hasRegisterAck()) {
 				if (msg.getRegisterAck().getSuccess()) {
@@ -123,11 +122,31 @@ public class ConnectionManagerGrpcImpl implements ConnectionManager {
 	};
 
 	private void sendRegister() {
+		InetAddress address = null;
+		String hostName = "";
+		String ip = "";
+		try {
+			address = InetAddress.getLocalHost();
+			hostName = address.getHostName();
+			ip = address.getHostAddress();
+		}
+		catch (UnknownHostException e) {
+		}
+		OperatingSystem os = systemInfo.getOperatingSystem();
+		String osName = os.getFamily();
+		String arch = System.getProperty("os.arch");
 		requestStream.onNext(AgentMessage.newBuilder()
-				.setAgentId(agentId)
+				.setAgentId(configProps.getAgentId())
 				.setRegister(RegisterRequest.newBuilder()
-						.setAgentId(agentId)
-						.setHostname("hosta").build())
+						.setEnv(configProps.getEnv())
+						.setNamespace(configProps.getNamespace())
+						.setAgentId(configProps.getAgentId())
+						.setHostname(hostName)
+						.setIp(ip)
+						.setOs(osName)
+						.setArch(arch)
+						.setVersion("alpha-1")
+						.build())
 				.build());
 	}
 
@@ -135,14 +154,16 @@ public class ConnectionManagerGrpcImpl implements ConnectionManager {
 	public synchronized void reconnect() {
 	}
 
+	@Scheduled(fixedRate = 30_000)
 	@Override
 	public void sendHeartbeat() {
+		LOGGER.info("send heartbeat in thread {}", Thread.currentThread().getName());
 		if (!connected.get() || requestStream == null) {
 			return;
 		}
 		try {
 			requestStream.onNext(AgentMessage.newBuilder()
-					.setAgentId(agentId)
+					.setAgentId(configProps.getAgentId())
 					.setHeartbeat(buildHeartbeat())
 					.build());
 		}
@@ -172,16 +193,14 @@ public class ConnectionManagerGrpcImpl implements ConnectionManager {
 
 	@Override
 	public void sendProgress() {
-		for (DownloadTaskContext task : registry.all()) {
-			if (task.status().get() == TaskStatus.RUNNING) {
-				requestStream.onNext(AgentMessage.newBuilder().setProgress(
-								TransferProcess.newBuilder()
-										.setTaskId(task.taskId())
-										.setTransferred(task.transferred().get())
-										.build())
-						.build());
-			}
-		}
+	}
+
+	@EventListener
+	public void handleProgressEvent(TransferProcess process) {
+		requestStream.onNext(AgentMessage.newBuilder().setProgress(
+				process
+		).build());
+		LOGGER.info("process progress: {}, thread {}", process, Thread.currentThread().getName());
 	}
 
 	@Override
@@ -191,7 +210,6 @@ public class ConnectionManagerGrpcImpl implements ConnectionManager {
 
 	@PreDestroy
 	public void stop() {
-		scheduler.shutdownNow();
 		if (requestStream != null) {
 			requestStream.onCompleted();
 		}
