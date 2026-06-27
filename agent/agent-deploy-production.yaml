@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: artifact-agent-production
+
+spec:
+  replicas: 3
+
+  selector:
+    matchLabels:
+      app: artifact-agent
+
+  template:
+    metadata:
+      labels:
+        app: artifact-agent
+
+    spec:
+      containers:
+        - name: artifact-agent
+          image: artifact-agent:latest
+          imagePullPolicy: Never
+          workingDir: /app
+
+          env:
+            - name: SPRING_DOCKER_COMPOSE_ENABLED
+              value: "false"
+            - name: CONFIGS_REMOTE_SERVER_HOST
+              value: artifact-server
+            - name: CONFIGS_REMOTE_SERVER_PORT
+              value: "9090"
+            - name: CONFIGS_ENV
+              value: production
+            - name: CONFIGS_NAMESPACE
+              value: cluster-production
+            - name: POD_NAME
+              value: artifact-agent
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: CONFIGS_AGENT_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+
+          volumeMounts:
+            - name: data-agent
+              mountPath: /mnt
+      automountServiceAccountToken: false
+      volumes:
+        - name: data-agent
+          persistentVolumeClaim:
+            claimName: server-pvc

@@ -1,7 +1,5 @@
 package com.example.agent.core;
 
-import java.net.InetAddress;
-import java.net.UnknownHostException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -122,16 +120,8 @@ public class ConnectionManagerGrpcImpl implements ConnectionManager {
 	};
 
 	private void sendRegister() {
-		InetAddress address = null;
-		String hostName = "";
-		String ip = "";
-		try {
-			address = InetAddress.getLocalHost();
-			hostName = address.getHostName();
-			ip = address.getHostAddress();
-		}
-		catch (UnknownHostException e) {
-		}
+		String ip = System.getenv("POD_IP");
+		String hostName = System.getenv("POD_NAME");
 		OperatingSystem os = systemInfo.getOperatingSystem();
 		String osName = os.getFamily();
 		String arch = System.getProperty("os.arch");

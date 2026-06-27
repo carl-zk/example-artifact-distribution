@@ -56,7 +56,7 @@ public class AgentDownloader {
 					if (throwable == null) {
 						taskContext.status().set(TaskStatus.SUCCESS);
 					}
-					else if (throwable instanceof ChunckVerificationException e) {
+					else if (throwable instanceof ChunckVerificationException _) {
 						taskContext.status().set(TaskStatus.PENDING);
 						if (registry.enqueue(taskContext.assignTask())) {
 							LOGGER.info("retry task {}", taskContext.assignTask().getTaskId());
@@ -80,26 +80,14 @@ public class AgentDownloader {
 		}
 	}
 
-	private CompletableFuture<Void> download(DownloadTaskContext taskContext) {
+	public CompletableFuture<Void> download(DownloadTaskContext taskContext) {
 		taskContext.status().set(TaskStatus.RUNNING);
 		CompletableFuture<Void> future = new CompletableFuture<>();
 		try {
 			long offset = resumeStore.loadOffset(taskContext.assignTask().getFileId());
-			@SuppressWarnings("resource")
-			DownloadSession session = new DownloadSession(Path.of(taskContext.assignTask().getTargetDir(), taskContext.assignTask().getFileName()));
-			DownloadObserver observer = new DownloadObserver(
-					taskContext,
-					session,
-					resumeStore,
-					grpcClient.getFileTransferServiceBlockingStub(),
-					publisher,
-					future,
-					null);
-			FileRequest request = FileRequest.newBuilder()
-					.setTransferId(taskContext.transferId())
-					.setTaskId(taskContext.assignTask().getTaskId())
-					.setFileId(taskContext.assignTask().getFileId())
-					.setStartOffset(offset).build();
+			@SuppressWarnings("resource") DownloadSession session = new DownloadSession(Path.of(taskContext.assignTask().getTargetDir(), taskContext.assignTask().getFileName()));
+			DownloadObserver observer = new DownloadObserver(taskContext, session, resumeStore, grpcClient.getFileTransferServiceBlockingStub(), publisher, future, null);
+			FileRequest request = FileRequest.newBuilder().setTransferId(taskContext.transferId()).setTaskId(taskContext.assignTask().getTaskId()).setFileId(taskContext.assignTask().getFileId()).setStartOffset(offset).build();
 			LOGGER.info("invode asyncStub.downloadFile, transferId={}, taskId={}", request.getTransferId(), taskContext.assignTask().getTaskId());
 			grpcClient.getFileTransferServiceStub().downloadFile(request, observer);
 			LOGGER.info("invode asyncStub.downloadFile done, transferId={}, taskId={}", request.getTransferId(), taskContext.assignTask().getTaskId());

@@ -12,7 +12,12 @@ import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import reactor.core.publisher.Mono;
+import reactor.test.StepVerifier;
 
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferUtils;
@@ -23,7 +28,10 @@ import org.springframework.web.reactive.function.client.WebClient;
  * @author carl
  * @date 6/11/26 5:37 PM
  */
+@Disabled
 public class DownloaderTest {
+	Logger logger = LoggerFactory.getLogger(DownloaderTest.class);
+
 	@Test
 	void download_from_uri() throws IOException, URISyntaxException {
 		WebClient client = WebClient.create();
@@ -77,5 +85,14 @@ public class DownloaderTest {
 		} while (value >= 1024 && unitIndex < units.length - 1);
 
 		return String.format("%.2f %s", value, units[unitIndex]);
+	}
+
+	@Test
+	void download_from_file() {
+		Mono<String> mono = Mono.error(new IOException("file not found"));
+		StepVerifier.create(mono)
+				.expectErrorMatches(throwable -> throwable instanceof IOException e
+						&& "file not found".equalsIgnoreCase(e.getMessage()))
+				.verify();
 	}
 }

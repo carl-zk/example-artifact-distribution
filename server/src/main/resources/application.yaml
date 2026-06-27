@@ -10,10 +10,14 @@ spring:
   sql:
     init:
       mode: always
+  docker:
+    compose:
+      enabled: false
 server:
   port: 9080
 logging:
   level:
     org.springframework.r2dbc: DEBUG
 configs:
-  storage-dir: /tmp/data/server
+  storage-dir: /mnt/data/server
+  transfer-server-port: 9090

@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: artifact-server
+
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: artifact-server
+
+  template:
+    metadata:
+      labels:
+        app: artifact-server
+
+    spec:
+      containers:
+        - name: artifact-server
+          image: artifact-server:latest
+          imagePullPolicy: Never
+          workingDir: /app
+
+          env:
+            - name: SPRING_DOCKER_COMPOSE_ENABLED
+              value: "false"
+            - name: CONFIGS_STORAGE_DIR
+              value: "/mnt/data/server"
+
+          ports:
+            - containerPort: 9080
+          volumeMounts:
+            - name: data-server
+              mountPath: /mnt
+      automountServiceAccountToken: false
+      volumes:
+        - name: data-server
+          persistentVolumeClaim:
+            claimName: server-pvc

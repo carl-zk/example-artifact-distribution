@@ -42,6 +42,7 @@ public class DownloadTaskRegistry {
 		return c;
 	}
 
+	@SuppressWarnings("null")
 	public Collection<DownloadTaskContext> all() {
 		return ImmutableList.copyOf(tasks.values());
 	}

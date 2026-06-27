@@ -39,9 +39,9 @@ public class AppConfig {
 	}
 
 	@Bean
-	public Server transferServer(ControlPlane controlPlane, FileTransferGrpcService fileTransferGrpcService) {
+	public Server transferServer(ControlPlane controlPlane, FileTransferGrpcService fileTransferGrpcService, ConfigProps configProps) {
 		Server server = NettyServerBuilder
-				.forPort(9090)
+				.forPort(configProps.transferServerPort)
 				.permitKeepAliveTime(1, TimeUnit.MINUTES)
 				.permitKeepAliveWithoutCalls(true)
 				.maxInboundMessageSize(32 * 1024 * 1024)
@@ -76,7 +76,7 @@ public class AppConfig {
 			@Override
 			public void addCorsMappings(CorsRegistry registry) {
 				registry.addMapping("/**")
-						.allowedOrigins("http://localhost:5173")
+						.allowedOriginPatterns("*")
 						.allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
 						.allowedHeaders("*")
 						.allowCredentials(true);

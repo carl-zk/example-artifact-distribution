@@ -17,4 +17,6 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "configs")
 public class ConfigProps {
 	String storageDir;
+
+	int transferServerPort;
 }
