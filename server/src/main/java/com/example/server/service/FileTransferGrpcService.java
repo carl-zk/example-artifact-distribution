@@ -42,7 +42,7 @@ public class FileTransferGrpcService extends FileTransferServiceGrpc.FileTransfe
 
 	public static final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
-	public static final int CHUNK_SIZE = 4 * 1024 * 1024; // 4M
+	public static final int CHUNK_SIZE = 8 * 1024 * 1024; // 8M
 
 	final FileRecordRepository fileRecordRepository;
 
@@ -64,7 +64,7 @@ public class FileTransferGrpcService extends FileTransferServiceGrpc.FileTransfe
 			channel.position(request.getStartOffset());
 			SendContext ctx = new SendContext(request, channel, new AtomicLong(
 					request.getStartOffset()),
-					ByteBuffer.allocate(CHUNK_SIZE),
+					ByteBuffer.allocateDirect(CHUNK_SIZE), // avoid one JVM copy
 					new AtomicBoolean(false),
 					new AtomicBoolean(false),
 					new AtomicBoolean(false));

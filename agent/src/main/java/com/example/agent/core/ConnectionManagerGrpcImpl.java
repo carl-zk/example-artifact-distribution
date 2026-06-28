@@ -120,8 +120,8 @@ public class ConnectionManagerGrpcImpl implements ConnectionManager {
 	};
 
 	private void sendRegister() {
-		String ip = System.getenv("POD_IP");
-		String hostName = System.getenv("POD_NAME");
+		String ip = configProps.getPodIp();
+		String hostName = configProps.getPodIp();
 		OperatingSystem os = systemInfo.getOperatingSystem();
 		String osName = os.getFamily();
 		String arch = System.getProperty("os.arch");

@@ -31,4 +31,8 @@ public class ConfigProps {
 	int remoteServerPort = 8080;
 
 	DataSize maxInboundMessageSize = DataSize.ofMegabytes(4);
+
+	String podName = "default";
+
+	String podIp = "127.0.0.1";
 }
